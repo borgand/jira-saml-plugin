@@ -88,10 +88,21 @@ public class SsoLoginServlet extends HttpServlet {
 	        request.getSession().setAttribute("SAMLCredential", credential);
 
 
+			String[] userNames;
 			String uidAttribute = saml2Config.getUidAttribute();
-			String userName = uidAttribute.equals("NameID") ? credential.getNameID().getValue() : credential.getAttributeAsString(uidAttribute);
+			if (uidAttribute.equals("NameID")) {
+				userNames = new String[1];
+				userNames[0] = credential.getNameID().getValue();
+			}
+			else {
+				userNames = credential.getAttributeAsStringArray(uidAttribute);
+				// null is returned when attribute is not present - handle that
+				if (userNames == null){
+					userNames = new String[0];
+				}
+			}
 
-			authenticateUserAndLogin(request, response, userName);
+			authenticateUserAndLogin(request, response, userNames);
 		} catch (AuthenticationException e) {
 			try {
 			    log.error("saml plugin error + " + e.getMessage());
@@ -110,7 +121,7 @@ public class SsoLoginServlet extends HttpServlet {
 	}
 
 	private void authenticateUserAndLogin(HttpServletRequest request,
-			HttpServletResponse response, String username)
+			HttpServletResponse response, String[] usernames)
 			throws NoSuchMethodException, IllegalAccessException,
 			InvocationTargetException, IOException, PermissionException, CreateException {
 		Authenticator authenticator = SecurityConfigFactory.getInstance().getAuthenticator();
@@ -120,10 +131,18 @@ public class SsoLoginServlet extends HttpServlet {
 
 		    Method getUserMethod = DefaultAuthenticator.class.getDeclaredMethod("getUser", new Class[]{String.class});
 		    getUserMethod.setAccessible(true);
-		    Object userObject = getUserMethod.invoke(authenticator, new Object[]{username});
+		    Object userObject = null;
+
+			for (String username : usernames){
+				userObject = getUserMethod.invoke(authenticator, new Object[]{username});
+				// stop at first match
+				if (userObject != null) {
+					break;
+				}
+			}
 			// if not found, see if we're allowed to auto-create the user
-			if (userObject == null) {
-				userObject = tryCreateOrUpdateUser(username);
+			if (userObject == null && usernames.length > 0) {
+				userObject = tryCreateOrUpdateUser(usernames[0]);
 			}
 		    if(userObject != null && userObject instanceof DelegatingApplicationUser) {
 		    	Principal principal = (Principal)userObject;
